@@ -7,6 +7,14 @@
     });
   }
 
+  // ---------- Utility ----------
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const pick = (arr) => arr[randInt(0, arr.length - 1)];
+  const now = () => performance.now();
+
   // ---------- Setup ----------
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
@@ -92,14 +100,6 @@
     });
   }
   renderLegend();
-
-  // ---------- Utility ----------
-  const rand = (a, b) => a + Math.random() * (b - a);
-  const randInt = (a, b) => Math.floor(rand(a, b + 1));
-  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const pick = (arr) => arr[randInt(0, arr.length - 1)];
-  const now = () => performance.now();
 
   function segIntersect(p1, p2, p3, p4) {
     const d1x = p2.x - p1.x, d1y = p2.y - p1.y;

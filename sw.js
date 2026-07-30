@@ -1,4 +1,4 @@
-const CACHE = "constellate-v1";
+const CACHE = "constellate-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -24,20 +24,20 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// Network-first: always serve the freshest build when online, so a
+// half-updated cache can never mix an old file with a new one. Cache is
+// only a fallback for when the device is offline.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
