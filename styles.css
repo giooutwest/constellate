@@ -83,6 +83,15 @@ html, body {
   font-style: italic;
 }
 
+.stats-row {
+  display: flex;
+  gap: 10px;
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
 .hud-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: auto; }
 .hud-row { display: flex; gap: 6px; }
 
@@ -179,7 +188,7 @@ html, body {
 
 .toast.hidden { opacity: 0; pointer-events: none; }
 
-.intro, .choice, .chronicle {
+.intro, .choice, .chronicle, .inspector {
   position: fixed;
   inset: 0;
   z-index: 20;
