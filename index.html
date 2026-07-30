@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Constellate — Trade Routes</title>
-<meta name="description" content="Draw straight trade routes between settlements, keep the network flowing, and survive the wars that break it.">
-<meta name="theme-color" content="#05060f">
+<title>Constellate — A Chronicle of Trade &amp; War</title>
+<meta name="description" content="Chart trade roads between medieval towns, answer the crown's demands, and survive the wars that break your roads.">
+<meta name="theme-color" content="#ece0bc">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Constellate">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -16,16 +16,23 @@
 </head>
 <body>
   <canvas id="game"></canvas>
+  <div class="frame"></div>
 
   <div id="hud" class="hud">
     <div class="hud-left">
+      <div class="prosperity-label">Prosperity</div>
       <div class="score" id="score">0</div>
-      <div class="best" id="best">best 0</div>
+      <div class="best" id="best">best reign: 0</div>
     </div>
     <div class="hud-right">
-      <button id="outpostBtn" class="pill" aria-label="Found outpost">⛺ Outpost (1)</button>
-      <button id="modeBtn" class="pill" aria-label="Toggle mode">Trade</button>
-      <button id="newMapBtn" class="pill" aria-label="New map">↻ New Map</button>
+      <div class="hud-row">
+        <button id="chronicleBtn" class="pill chronicleBtn" aria-label="Open chronicle">📜 Chronicle</button>
+      </div>
+      <div class="hud-row">
+        <button id="outpostBtn" class="pill" aria-label="Found outpost">Outpost (1)</button>
+        <button id="modeBtn" class="pill" aria-label="Toggle mode">Kingdom</button>
+        <button id="newMapBtn" class="pill" aria-label="New realm">↻ New Realm</button>
+      </div>
     </div>
   </div>
 
@@ -36,12 +43,30 @@
   <div id="toast" class="toast hidden"></div>
 
   <div id="intro" class="intro">
-    <div class="intro-card">
+    <div class="card">
       <h1>Constellate</h1>
-      <p>Drag between towns to lay straight trade roads. Every town needs certain goods — satisfy them by linking it, directly or through others, to a town that produces them.</p>
-      <p class="tip">Found outposts to relay trade around trouble. War breaks out between towns without warning&nbsp;— routes get severed, direct trade gets blockaded — so plan your roads to survive it.</p>
-      <button id="startBtn" class="startBtn">Start Trading</button>
-      <button id="startZenBtn" class="startZenBtn">Just Doodle (Zen)</button>
+      <div class="subtitle">A Chronicle of Trade &amp; War</div>
+      <hr class="rule">
+      <p>Drag between towns to lay straight trade roads. Every town hungers for goods it cannot make itself — satisfy its needs by linking it, directly or through others, to a town that produces them.</p>
+      <p class="tip">Found outposts to relay trade around trouble. The realm has its own will: populations grow, harvests bless one town and blight strikes another, wars sever roads without warning, and now and then the crown itself will demand an answer of you.</p>
+      <button id="startBtn" class="startBtn">Begin Your Reign</button>
+      <button id="startZenBtn" class="startZenBtn">Just Sketch a Realm (no events)</button>
+    </div>
+  </div>
+
+  <div id="choiceOverlay" class="choice hidden">
+    <div class="card">
+      <h2 id="choiceTitle"></h2>
+      <p id="choiceText"></p>
+      <div id="choiceOptions"></div>
+    </div>
+  </div>
+
+  <div id="chronicleOverlay" class="chronicle hidden">
+    <div class="card">
+      <h2>The Chronicle</h2>
+      <div id="chronicleList" class="chronicle-list"></div>
+      <button id="chronicleCloseBtn" class="closeBtn">Close</button>
     </div>
   </div>
 
