@@ -55,7 +55,7 @@ html, body {
   align-items: flex-start;
   padding: 22px 22px 0;
   pointer-events: none;
-  z-index: 10;
+  z-index: 15;
 }
 
 .hud-left { display: flex; flex-direction: column; gap: 0; }
@@ -117,7 +117,7 @@ html, body {
 
 .banner {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 78px);
+  top: calc(env(safe-area-inset-top, 0px) + 118px);
   left: 50%;
   transform: translateX(-50%);
   background: var(--parchment);
