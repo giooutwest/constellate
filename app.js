@@ -14,6 +14,7 @@
   const bestEl = document.getElementById("best");
   const modeBtn = document.getElementById("modeBtn");
   const newMapBtn = document.getElementById("newMapBtn");
+  const outpostBtn = document.getElementById("outpostBtn");
   const bannerEl = document.getElementById("banner");
   const legendEl = document.getElementById("legend");
   const toastEl = document.getElementById("toast");
@@ -45,6 +46,9 @@
     { id: "tools", name: "Tools", color: "#5ee6ff" }
   ];
   const RES = Object.fromEntries(RESOURCES.map(r => [r.id, r]));
+
+  const NAME_PREFIX = ["River", "Stone", "Oak", "Iron", "Salt", "Wolf", "Thorn", "Ash", "Black", "Storm", "Elder", "Bright"];
+  const NAME_SUFFIX = ["ford", "haven", "hold", "mere", "wick", "burg", "reach", "fall", "gate", "moor", "crest", "vale"];
 
   function renderLegend() {
     legendEl.innerHTML = "";
@@ -87,11 +91,19 @@
     return dist(p, proj);
   }
 
+  // ---------- Tunables (pace) ----------
+  const WAR_WARN_MS = 8000;
+  const WAR_INTERVAL = () => rand(48000, 78000);
+  const BLOCKADE_MS = 45000;
+  const OUTPOST_CHARGE_CAP = 3;
+  const OUTPOST_CHARGE_INTERVAL = 55000;
+  const FLOW_SPAWN_MS = 1500;
+
   // ---------- Game state ----------
   let mode = "trade"; // 'trade' | 'zen'
-  let settlements = [];
-  let edges = []; // {a,b, severed, warn, warnUntil, severedAt, born}
-  let pairCooldown = new Map(); // "a-b" -> timestamp until which reconnecting is blocked
+  let settlements = []; // towns + outposts
+  let edges = [];
+  let pairCooldown = new Map();
   let particles = [];
   let sparks = [];
   let score = 0;
@@ -100,18 +112,27 @@
   let dragPos = null;
   let hoverSettlement = null;
   let lastTick = now();
-  let nextEventAt = now() + rand(18000, 30000);
+  let mapMinDist = 60;
   let started = false;
+
+  let activeWar = null; // {a, b, edge|null, warnUntil}
+  let nextEventAt = now() + WAR_INTERVAL();
+
+  let placingOutpost = false;
+  let outpostCharges = 1;
+  let lastChargeAt = now();
 
   bestEl.textContent = "best " + best;
 
   function keyFor(i, j) { return i < j ? `${i}-${j}` : `${j}-${i}`; }
+  function townName(n) { return n.type === "town" ? n.name : "the outpost"; }
 
   // ---------- Map generation ----------
   function generateSettlements() {
-    const count = clamp(Math.round((W * H) / 42000), 9, 15);
+    const count = clamp(Math.round((W * H) / 52000), 7, 12);
     const pts = [];
-    const minDist = Math.min(W, H) * 0.16;
+    const minDist = Math.min(W, H) * 0.2;
+    mapMinDist = minDist;
     const margin = Math.min(W, H) * 0.1;
     let attempts = 0;
     while (pts.length < count && attempts < 4000) {
@@ -120,26 +141,31 @@
       const y = rand(margin + 70, H - margin - 90);
       if (pts.every(p => dist(p, { x, y }) > minDist)) pts.push({ x, y });
     }
-    // assign produce round-robin then shuffle for even coverage
     const produceList = [];
     for (let i = 0; i < pts.length; i++) produceList.push(RESOURCES[i % RESOURCES.length].id);
     for (let i = produceList.length - 1; i > 0; i--) {
       const j = randInt(0, i);
       [produceList[i], produceList[j]] = [produceList[j], produceList[i]];
     }
+    const usedNames = new Set();
     return pts.map((p, i) => {
       const produces = produceList[i];
-      const needCount = Math.random() < 0.55 ? 1 : 2;
+      const needCount = Math.random() < 0.4 ? 1 : 2;
       const needs = [];
       while (needs.length < needCount) {
         const r = pick(RESOURCES).id;
         if (r !== produces && !needs.includes(r)) needs.push(r);
       }
+      let name;
+      do { name = pick(NAME_PREFIX) + pick(NAME_SUFFIX); } while (usedNames.has(name));
+      usedNames.add(name);
       return {
         id: i,
+        type: "town",
+        name,
         x: p.x, y: p.y,
         produces, needs,
-        capacity: mode === "zen" ? 999 : randInt(2, 3),
+        capacity: randInt(2, 3),
         satisfied: new Set(),
         pulse: Math.random() * Math.PI * 2,
         r: 16
@@ -156,8 +182,13 @@
     score = 0;
     dragFrom = null;
     dragPos = null;
-    nextEventAt = now() + rand(18000, 30000);
+    activeWar = null;
+    nextEventAt = now() + WAR_INTERVAL();
+    placingOutpost = false;
+    outpostCharges = mode === "zen" ? Infinity : 1;
+    lastChargeAt = now();
     hideBanner();
+    updateOutpostButton();
   }
 
   // ---------- Connectivity / satisfaction ----------
@@ -167,11 +198,11 @@
     const adj = settlements.map(() => []);
     activeEdges().forEach(e => { adj[e.a].push(e.b); adj[e.b].push(e.a); });
 
-    settlements.forEach(s => s.satisfied.clear());
+    settlements.forEach(s => s.type === "town" && s.satisfied.clear());
 
     settlements.forEach(s => {
+      if (s.type !== "town") return;
       s.needs.forEach(needRes => {
-        // BFS from s over active edges, looking for a settlement producing needRes
         const seen = new Set([s.id]);
         const q = [s.id];
         let found = false;
@@ -180,7 +211,8 @@
           for (const nb of adj[cur]) {
             if (seen.has(nb)) continue;
             seen.add(nb);
-            if (settlements[nb].produces === needRes) { found = true; break; }
+            const node = settlements[nb];
+            if (node.type === "town" && node.produces === needRes) { found = true; break; }
             q.push(nb);
           }
         }
@@ -212,7 +244,7 @@
   let multiplier = 1;
   function scoreTick() {
     computeSatisfaction();
-    const satisfiedCount = settlements.reduce((sum, s) => sum + s.satisfied.size, 0);
+    const satisfiedCount = settlements.reduce((sum, s) => sum + (s.type === "town" ? s.satisfied.size : 0), 0);
     const act = activeEdges();
     const cPairs = crossingPairs();
     const crossingFree = act.length ? clamp(1 - cPairs / act.length, 0, 1) : 1;
@@ -229,31 +261,55 @@
   }
 
   // ---------- Events (war) ----------
+  function pickWarPair() {
+    const towns = settlements.filter(n => n.type === "town");
+    if (towns.length < 2) return null;
+    const activeTownEdges = activeEdges().filter(e => settlements[e.a].type === "town" && settlements[e.b].type === "town");
+    if (activeTownEdges.length && Math.random() < 0.7) {
+      const e = pick(activeTownEdges);
+      return { a: e.a, b: e.b, edge: e };
+    }
+    for (let tries = 0; tries < 20; tries++) {
+      const a = pick(towns), b = pick(towns);
+      if (a.id === b.id) continue;
+      const cd = pairCooldown.get(keyFor(a.id, b.id));
+      if (cd && now() < cd) continue;
+      const edge = edges.find(e => !e.severed && ((e.a === a.id && e.b === b.id) || (e.a === b.id && e.b === a.id))) || null;
+      return { a: a.id, b: b.id, edge };
+    }
+    return null;
+  }
+
   function maybeTriggerEvent(t) {
-    if (mode !== "trade") return;
+    if (mode !== "trade" || activeWar) return;
     if (t < nextEventAt) return;
-    const candidates = activeEdges().filter(e => !e.warn);
-    if (!candidates.length) { nextEventAt = t + rand(8000, 14000); return; }
-    const e = pick(candidates);
-    e.warn = true;
-    e.warnUntil = t + 5000;
-    const sa = settlements[e.a], sb = settlements[e.b];
-    showBanner(`⚔ War brewing — route ${sa.produces.toUpperCase()}↔${sb.produces.toUpperCase()} severed in 5s`);
-    nextEventAt = t + rand(22000, 36000);
+    const target = pickWarPair();
+    if (!target) { nextEventAt = t + rand(15000, 25000); return; }
+    activeWar = { a: target.a, b: target.b, edge: target.edge, warnUntil: t + WAR_WARN_MS };
+    const sa = settlements[target.a], sb = settlements[target.b];
+    if (target.edge) {
+      showBanner(`⚔ War brewing — the road between ${sa.name} and ${sb.name} will be severed in 8s`);
+    } else {
+      showBanner(`⚔ Tensions rising — ${sa.name} and ${sb.name} refuse direct trade`);
+    }
   }
 
   function updateEvents(t) {
-    edges.forEach(e => {
-      if (e.warn && !e.severed && t >= e.warnUntil) {
-        e.severed = true;
-        e.severedAt = t;
-        e.warn = false;
-        pairCooldown.set(keyFor(e.a, e.b), t + 20000);
-        hideBanner();
-        spawnSparkBurst(midpoint(e), "#ff5e5e");
-        showToast("Route destroyed");
-      }
-    });
+    if (!activeWar) return;
+    if (t < activeWar.warnUntil) return;
+    const { a, b, edge } = activeWar;
+    if (edge && !edge.severed) {
+      edge.severed = true;
+      spawnSparkBurst(midpoint(edge), "#ff5e5e");
+      showToast("Route destroyed");
+    } else {
+      spawnSparkBurst({ x: (settlements[a].x + settlements[b].x) / 2, y: (settlements[a].y + settlements[b].y) / 2 }, "#ff5e5e");
+      showToast("Direct trade blocked");
+    }
+    pairCooldown.set(keyFor(a, b), t + BLOCKADE_MS);
+    activeWar = null;
+    hideBanner();
+    nextEventAt = t + WAR_INTERVAL();
   }
 
   function midpoint(e) {
@@ -262,7 +318,6 @@
   }
 
   // ---------- Banner / toast ----------
-  let bannerTimeout = null;
   function showBanner(text) {
     bannerEl.textContent = text;
     bannerEl.classList.remove("hidden");
@@ -274,8 +329,41 @@
     toastEl.textContent = text;
     toastEl.classList.remove("hidden");
     clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => toastEl.classList.add("hidden"), 1400);
+    toastTimeout = setTimeout(() => toastEl.classList.add("hidden"), 1600);
   }
+
+  // ---------- Outposts ----------
+  function updateOutpostButton() {
+    if (mode === "zen") { outpostBtn.textContent = "⛺ Outpost ∞"; outpostBtn.classList.toggle("armed", placingOutpost); return; }
+    outpostBtn.textContent = `⛺ Outpost (${outpostCharges})`;
+    outpostBtn.classList.toggle("armed", placingOutpost);
+  }
+
+  function tryFoundOutpost(pos) {
+    const minGap = mapMinDist * 0.5;
+    const tooClose = settlements.some(s => dist(s, pos) < minGap) ||
+      pos.x < 30 || pos.x > W - 30 || pos.y < 60 || pos.y > H - 70;
+    if (tooClose) { showToast("Too close to build here"); return; }
+    settlements.push({
+      id: settlements.length,
+      type: "outpost",
+      name: "Outpost",
+      x: pos.x, y: pos.y,
+      capacity: 5,
+      pulse: Math.random() * Math.PI * 2,
+      r: 13
+    });
+    if (mode !== "zen") outpostCharges--;
+    placingOutpost = false;
+    updateOutpostButton();
+    showToast("Outpost founded");
+  }
+
+  outpostBtn.addEventListener("click", () => {
+    if (mode !== "zen" && outpostCharges <= 0) { showToast("No outposts available yet"); return; }
+    placingOutpost = !placingOutpost;
+    updateOutpostButton();
+  });
 
   // ---------- Particles ----------
   function spawnSparkBurst(pos, color) {
@@ -293,12 +381,14 @@
   let flowAccum = 0;
   function updateParticles(dt) {
     flowAccum += dt;
-    if (flowAccum > 650) {
+    if (flowAccum > FLOW_SPAWN_MS) {
       flowAccum = 0;
       activeEdges().forEach(e => {
         const a = settlements[e.a], b = settlements[e.b];
-        particles.push({ edge: e, from: e.a, to: e.b, t: 0, color: a.produces, speed: rand(0.35, 0.55) });
-        particles.push({ edge: e, from: e.b, to: e.a, t: 0, color: b.produces, speed: rand(0.35, 0.55) });
+        const colorA = a.type === "town" ? a.produces : null;
+        const colorB = b.type === "town" ? b.produces : null;
+        if (colorA) particles.push({ edge: e, from: e.a, to: e.b, t: 0, color: colorA, speed: rand(0.16, 0.24) });
+        if (colorB) particles.push({ edge: e, from: e.b, to: e.a, t: 0, color: colorB, speed: rand(0.16, 0.24) });
       });
     }
     particles = particles.filter(p => !p.edge.severed && p.t < 1);
@@ -336,9 +426,13 @@
   function tryConnect(aId, bId) {
     if (aId === bId) return;
     if (edgeExists(aId, bId)) return;
+    if (activeWar && ((activeWar.a === aId && activeWar.b === bId) || (activeWar.a === bId && activeWar.b === aId))) {
+      showToast("Can't route through open conflict");
+      return;
+    }
     const cd = pairCooldown.get(keyFor(aId, bId));
     if (cd && now() < cd) { showToast("Too dangerous to rebuild yet"); return; }
-    edges.push({ a: aId, b: bId, severed: false, warn: false, warnUntil: 0, born: now() });
+    edges.push({ a: aId, b: bId, severed: false, born: now() });
   }
 
   function getPos(evt) {
@@ -349,10 +443,12 @@
   canvas.addEventListener("pointerdown", (e) => {
     if (!started) return;
     const pos = getPos(e);
+
+    if (placingOutpost) { tryFoundOutpost(pos); return; }
+
     if (mode === "zen") {
       const edge = nearestEdge(pos.x, pos.y, 14);
       if (edge && !nearestSettlement(pos.x, pos.y, 22)) {
-        edge.severed = true; // reuse for removal in zen (no cooldown consequence)
         edges = edges.filter(ed => ed !== edge);
         return;
       }
@@ -391,7 +487,7 @@
   startZenBtn.addEventListener("click", () => { mode = "zen"; modeBtn.textContent = "Zen"; resetMap(); introEl.classList.add("hidden"); started = true; });
 
   // ---------- Rendering ----------
-  function drawBackground(t) {
+  function drawBackground() {
     const g = ctx.createRadialGradient(W * 0.5, H * 0.35, 0, W * 0.5, H * 0.35, Math.max(W, H) * 0.8);
     g.addColorStop(0, "#12142a");
     g.addColorStop(1, "#05060f");
@@ -399,7 +495,7 @@
     ctx.fillRect(0, 0, W, H);
   }
 
-  function drawEdge(e, t) {
+  function drawEdge(e) {
     const a = settlements[e.a], b = settlements[e.b];
     if (e.severed) {
       ctx.save();
@@ -410,23 +506,30 @@
       ctx.restore();
       return;
     }
-    const c1 = RES[a.produces].color, c2 = RES[b.produces].color;
+    const c1 = a.type === "town" ? RES[a.produces].color : "#a9b8d9";
+    const c2 = b.type === "town" ? RES[b.produces].color : "#a9b8d9";
     const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
     grad.addColorStop(0, c1);
     grad.addColorStop(1, c2);
     ctx.save();
-    if (e.warn) {
-      const pulse = 0.5 + 0.5 * Math.sin(t / 90);
-      ctx.strokeStyle = `rgba(255,${Math.round(70 + 40 * pulse)},${Math.round(70 + 40 * pulse)},0.9)`;
-      ctx.shadowColor = "#ff5e5e";
-      ctx.shadowBlur = 18;
-      ctx.lineWidth = 3;
-    } else {
-      ctx.strokeStyle = grad;
-      ctx.shadowColor = c1;
-      ctx.shadowBlur = 8;
-      ctx.lineWidth = 2.2;
-    }
+    ctx.strokeStyle = grad;
+    ctx.shadowColor = c1;
+    ctx.shadowBlur = 8;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawWarWarning(t) {
+    if (!activeWar) return;
+    const a = settlements[activeWar.a], b = settlements[activeWar.b];
+    const pulse = 0.5 + 0.5 * Math.sin(t / 90);
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,${Math.round(70 + 50 * pulse)},${Math.round(70 + 50 * pulse)},0.85)`;
+    ctx.shadowColor = "#ff5e5e";
+    ctx.shadowBlur = 20;
+    ctx.lineWidth = 3;
+    ctx.setLineDash(activeWar.edge ? [] : [4, 8]);
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.restore();
   }
@@ -452,10 +555,36 @@
     });
   }
 
-  function drawSettlement(s, t) {
+  function drawRingDecorations(s, t) {
     const overloaded = mode === "trade" && degree(s.id) > s.capacity;
+    if (overloaded) {
+      const p = 0.5 + 0.5 * Math.sin(t / 150);
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,90,90,${0.4 + 0.4 * p})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 12, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    if (hoverSettlement === s || dragFrom === s.id) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 16, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      if (s.type === "town") {
+        ctx.save();
+        ctx.font = "600 12px -apple-system, sans-serif";
+        ctx.fillStyle = "rgba(234,241,255,0.85)";
+        ctx.textAlign = "center";
+        ctx.fillText(s.name, s.x, s.y - s.r - 20);
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawTown(s, t) {
     const color = RES[s.produces].color;
-    s.pulse += 0.02;
+    s.pulse += 0.012;
     const glow = 10 + Math.sin(s.pulse) * 3;
 
     ctx.save();
@@ -490,23 +619,33 @@
         ctx.restore();
       });
     }
+    drawRingDecorations(s, t);
+  }
 
-    if (overloaded) {
-      const p = 0.5 + 0.5 * Math.sin(t / 120);
-      ctx.save();
-      ctx.strokeStyle = `rgba(255,90,90,${0.4 + 0.4 * p})`;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 12, 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    }
+  function drawOutpost(s, t) {
+    const color = "#a9b8d9";
+    s.pulse += 0.012;
+    const glow = 8 + Math.sin(s.pulse) * 2;
 
-    if (hoverSettlement === s || dragFrom === s.id) {
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,255,255,0.5)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(s.x, s.y, s.r + 16, 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    }
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = glow;
+    const size = s.r * 1.1;
+    ctx.fillRect(-size / 2, -size / 2, size, size);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = "#05060f";
+    const inner = s.r * 0.55;
+    ctx.fillRect(-inner / 2, -inner / 2, inner, inner);
+    ctx.restore();
+
+    drawRingDecorations(s, t);
   }
 
   function drawDrag() {
@@ -535,17 +674,23 @@
     lastTick = t;
 
     ctx.clearRect(0, 0, W, H);
-    drawBackground(t);
+    drawBackground();
 
     if (started) {
       updateParticles(dt);
       if (mode === "trade") {
         maybeTriggerEvent(now());
         updateEvents(now());
+        if (now() - lastChargeAt > OUTPOST_CHARGE_INTERVAL && outpostCharges < OUTPOST_CHARGE_CAP) {
+          outpostCharges++;
+          lastChargeAt = now();
+          updateOutpostButton();
+        }
       }
-      edges.forEach(e => drawEdge(e, t));
+      edges.forEach(e => drawEdge(e));
+      drawWarWarning(t);
       drawParticles();
-      settlements.forEach(s => drawSettlement(s, t));
+      settlements.forEach(s => (s.type === "town" ? drawTown(s, t) : drawOutpost(s, t)));
       drawDrag();
       drawMultiplier();
     }
@@ -553,7 +698,6 @@
     requestAnimationFrame(frame);
   }
 
-  // score tick loop (independent cadence)
   setInterval(() => { if (started && mode === "trade") scoreTick(); }, 1000);
 
   resetMap();

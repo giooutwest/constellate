@@ -64,6 +64,12 @@ html, body {
 
 .pill:active { background: rgba(94, 230, 255, 0.18); }
 
+.pill.armed {
+  background: rgba(94, 230, 255, 0.22);
+  border-color: #5ee6ff;
+  box-shadow: 0 0 14px rgba(94, 230, 255, 0.35);
+}
+
 .banner {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 62px);
