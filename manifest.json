@@ -1,0 +1,15 @@
+{
+  "name": "Constellate — Trade Routes",
+  "short_name": "Constellate",
+  "description": "Draw straight trade routes between settlements, keep the network flowing, and survive the wars that break it.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#05060f",
+  "theme_color": "#05060f",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

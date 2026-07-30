@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Constellate — Trade Routes</title>
+<meta name="description" content="Draw straight trade routes between settlements, keep the network flowing, and survive the wars that break it.">
+<meta name="theme-color" content="#05060f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Constellate">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon.svg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hud">
+    <div class="hud-left">
+      <div class="score" id="score">0</div>
+      <div class="best" id="best">best 0</div>
+    </div>
+    <div class="hud-right">
+      <button id="modeBtn" class="pill" aria-label="Toggle mode">Trade</button>
+      <button id="newMapBtn" class="pill" aria-label="New map">↻ New Map</button>
+    </div>
+  </div>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <div id="legend" class="legend"></div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <div id="intro" class="intro">
+    <div class="intro-card">
+      <h1>Constellate</h1>
+      <p>Drag between settlements to lay straight trade routes. Satisfy every settlement's needs by linking it — directly or through others — to a producer of that resource.</p>
+      <p class="tip">Keep routes clean (fewer crossings) and don't overload a single hub. Wars will sever routes without warning&nbsp;— rebuild around them.</p>
+      <button id="startBtn" class="startBtn">Start Trading</button>
+      <button id="startZenBtn" class="startZenBtn">Just Doodle (Zen)</button>
+    </div>
+  </div>
+
+<script src="app.js"></script>
+</body>
+</html>
